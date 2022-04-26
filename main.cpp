@@ -128,7 +128,7 @@ int main(int argc, char *argv[]) {
     }
 
     free(delta);
-    return status;
+    return 0;
   }
 
   if (edflags & 0b01) {
@@ -146,7 +146,7 @@ int main(int argc, char *argv[]) {
     }
 
     free(target);
-    return status;
+    return 0;
   }
 
   free(target_delta);
