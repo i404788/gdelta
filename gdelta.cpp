@@ -153,12 +153,12 @@ void read_unit(B& buffer, DeltaUnitMem& unit) {
     unit.offset = read_varint(buffer);
   }
 #if DEBUG_UNITS
-  fprintf(stderr, "Reading unit %d %llu %llu\n", unit.flag, unit.length, unit.offset);
+  fprintf(stderr, "Reading unit %d %zu %zu\n", unit.flag, unit.length, unit.offset);
 #endif
 }
 
-const uint8_t varint_mask = ((2 << VarIntPart::lenbits) -1);
-const uint8_t head_varint_mask = ((2 << DeltaHeadUnit::lenbits) -1);
+const uint8_t varint_mask = ((1 << VarIntPart::lenbits) -1);
+const uint8_t head_varint_mask = ((1 << DeltaHeadUnit::lenbits) -1);
 template <typename B>
 void write_varint(B& buffer, uint64_t val) 
 {
@@ -182,7 +182,7 @@ void write_unit(B& buffer, const DeltaUnitMem& unit) {
   static_assert(!std::is_const<decltype(buffer.buf)>::value, "Stream needs to be writeable for write_field");
   // TODO: Abort if length 0?
 #if DEBUG_UNITS
-  fprintf(stderr, "Writing unit %d %llu %llu\n", unit.flag, unit.length, unit.offset);
+  fprintf(stderr, "Writing unit %d %zu %zu\n", unit.flag, unit.length, unit.offset);
 #endif
 
   DeltaHeadUnit head = {unit.flag, unit.length > head_varint_mask, (uint8_t)(unit.length & head_varint_mask)};
@@ -565,13 +565,14 @@ int gdecode(const uint8_t *deltaBuf, uint32_t deltaSize, const uint8_t *baseBuf,
   clock_gettime(CLOCK_MONOTONIC, &tf0);
 #endif
   ReadOnlyBufferStreamDescriptor deltaStream = {deltaBuf, 0, deltaSize}; // Instructions
-  uint64_t instructionLength = read_varint(deltaStream);
+  const uint64_t instructionLength = read_varint(deltaStream);
+  const uint64_t instOffset = deltaStream.cursor;
   ReadOnlyBufferStreamDescriptor addDeltaStream = {deltaBuf, deltaStream.cursor + instructionLength, deltaSize};
   ReadOnlyBufferStreamDescriptor baseStream = {baseBuf, 0, baseSize}; // Data in
   BufferStreamDescriptor outStream = {*outBuf, 0, *outSize};   // Data out
   DeltaUnitMem unit = {};
 
-  while (deltaStream.cursor < instructionLength) {
+  while (deltaStream.cursor < instructionLength + instOffset) {
     read_unit(deltaStream, unit);
     if (unit.flag) // Read from original file using offset
       stream_from(outStream, baseStream, unit.offset, unit.length);
