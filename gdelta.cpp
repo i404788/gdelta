@@ -2,7 +2,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdint.h>
-
+#include <type_traits>
 
 #ifdef _MSC_VER
 #include <compat/msvc.h>
