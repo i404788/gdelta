@@ -7,10 +7,10 @@
 #include <stdint.h>
 
 
-int gencode(uint8_t *newBuf, uint32_t newSize, uint8_t *baseBuf,
+int gencode(const uint8_t *newBuf, uint32_t newSize, const uint8_t *baseBuf,
             uint32_t baseSize, uint8_t **deltaBuf, uint32_t *deltaSize);
 
-int gdecode(uint8_t *deltaBuf, uint32_t deltaSize, uint8_t *baseBuf,
+int gdecode(const uint8_t *deltaBuf, uint32_t deltaSize, const uint8_t *baseBuf,
             uint32_t baseSize, uint8_t **outBuf, uint32_t *outSize);
 
 #endif // GDELTA_GDELTA_H

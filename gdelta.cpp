@@ -3,6 +3,7 @@
 #include <cstring>
 #include <stdint.h>
 
+
 #ifdef _MSC_VER
 #include <compat/msvc.h>
 #else
@@ -66,15 +67,25 @@ typedef struct {
   uint64_t length;
 } BufferStreamDescriptor;
 
-void ensure_stream_length(BufferStreamDescriptor &stream, size_t length) {
-  if (length > stream.length) {
-    stream.buf = (uint8_t*)realloc(stream.buf, length);
-    stream.length = length;
+typedef struct {
+  const uint8_t *buf;
+  uint64_t cursor;
+  uint64_t length;
+} ReadOnlyBufferStreamDescriptor;
+
+template <typename B>
+void ensure_stream_length(B &stream, size_t length) {
+  if constexpr (!std::is_const<decltype(stream.buf)>::value) {
+    if (length > stream.length) {
+      stream.buf = (uint8_t*)realloc(stream.buf, length);
+      stream.length = length;
+    }
   }
 }
 
-template <typename T>
-void write_field(BufferStreamDescriptor &buffer, const T &field) {
+template <typename B, typename T>
+void write_field(B &buffer, const T &field) {
+  static_assert(!std::is_const<decltype(buffer.buf)>::value, "Stream needs to be writeable for write_field");
   ensure_stream_length(buffer, buffer.cursor + sizeof(T));
   memcpy(buffer.buf + buffer.cursor, &field, sizeof(T));
   buffer.cursor += sizeof(T);
@@ -82,34 +93,41 @@ void write_field(BufferStreamDescriptor &buffer, const T &field) {
 }
 
 
-template <typename T>
-void read_field(BufferStreamDescriptor &buffer, T& field) {  
+template <typename B, typename T>
+void read_field(B &buffer, T& field) {  
   memcpy(&field, buffer.buf + buffer.cursor, sizeof(T));
   buffer.cursor += sizeof(T);
   // TODO: check bounds (buffer->length)?
 }
 
 
-void stream_into(BufferStreamDescriptor &dest, BufferStreamDescriptor &src, size_t length) {
+template <typename DstT, typename SrcT>
+void stream_into(DstT &dest, SrcT &src, size_t length) {
+  static_assert(!std::is_const<decltype(dest.buf)>::value, "Stream needs to be writeable for write_field");
   ensure_stream_length(dest, dest.cursor + length);
   memcpy(dest.buf + dest.cursor, src.buf + src.cursor, length);
   dest.cursor += length;
   src.cursor += length;
 }
 
-void stream_from(BufferStreamDescriptor &dest, const BufferStreamDescriptor &src, size_t src_cursor, size_t length) {
+template <typename DstT, typename SrcT>
+void stream_from(DstT &dest, const SrcT &src, size_t src_cursor, size_t length) {
+  static_assert(!std::is_const<decltype(dest.buf)>::value, "Stream needs to be writeable for write_field");
   ensure_stream_length(dest, dest.cursor + length);
   memcpy(dest.buf + dest.cursor, src.buf + src_cursor, length);
   dest.cursor += length;
 }
 
-void write_concat_buffer(BufferStreamDescriptor &dest, const BufferStreamDescriptor &src) {
+template <typename DstT, typename SrcT>
+void write_concat_buffer(DstT &dest, const SrcT &src) {
+  static_assert(!std::is_const<decltype(dest.buf)>::value, "Stream needs to be writeable for write_field");
   ensure_stream_length(dest, dest.cursor + src.cursor + 1);
   memcpy(dest.buf + dest.cursor, src.buf, src.cursor);
   dest.cursor += src.cursor;
 }
 
-uint64_t read_varint(BufferStreamDescriptor& buffer) {
+template <typename B>
+uint64_t read_varint(B& buffer) {
   VarIntPart vi;
   uint64_t val = 0;
   uint8_t offset = 0;
@@ -121,7 +139,8 @@ uint64_t read_varint(BufferStreamDescriptor& buffer) {
   return val;
 }
 
-void read_unit(BufferStreamDescriptor& buffer, DeltaUnitMem& unit) {
+template <typename B>
+void read_unit(B& buffer, DeltaUnitMem& unit) {
   DeltaHeadUnit head;
   read_field(buffer, head);
  
@@ -140,8 +159,10 @@ void read_unit(BufferStreamDescriptor& buffer, DeltaUnitMem& unit) {
 
 const uint8_t varint_mask = ((2 << VarIntPart::lenbits) -1);
 const uint8_t head_varint_mask = ((2 << DeltaHeadUnit::lenbits) -1);
-void write_varint(BufferStreamDescriptor& buffer, uint64_t val) 
+template <typename B>
+void write_varint(B& buffer, uint64_t val) 
 {
+  static_assert(!std::is_const<decltype(buffer.buf)>::value, "Stream needs to be writeable for write_field");
   VarIntPart vi;
   do {
     vi.subint = val & varint_mask;
@@ -156,7 +177,9 @@ void write_varint(BufferStreamDescriptor& buffer, uint64_t val)
   } while (1);
 }
 
-void write_unit(BufferStreamDescriptor& buffer, const DeltaUnitMem& unit) {
+template <typename B>
+void write_unit(B& buffer, const DeltaUnitMem& unit) {
+  static_assert(!std::is_const<decltype(buffer.buf)>::value, "Stream needs to be writeable for write_field");
   // TODO: Abort if length 0?
 #if DEBUG_UNITS
   fprintf(stderr, "Writing unit %d %llu %llu\n", unit.flag, unit.length, unit.offset);
@@ -173,7 +196,7 @@ void write_unit(BufferStreamDescriptor& buffer, const DeltaUnitMem& unit) {
 }
 
 
-void GFixSizeChunking(unsigned char *data, int len, int begflag, int begsize,
+void GFixSizeChunking(const uint8_t *data, int len, int begflag, int begsize,
                      uint32_t *hash_table, int mask) {
   if (len < STRLOOK)
     return;
@@ -213,7 +236,7 @@ void GFixSizeChunking(unsigned char *data, int len, int begflag, int begsize,
   return;
 }
 
-int gencode(uint8_t *newBuf, uint32_t newSize, uint8_t *baseBuf,
+int gencode(const uint8_t *newBuf, uint32_t newSize, const uint8_t *baseBuf,
             uint32_t baseSize, uint8_t **deltaBuf, uint32_t *deltaSize) {
 #if PRINT_PERF
   struct timespec tf0, tf1;
@@ -274,7 +297,7 @@ int gencode(uint8_t *newBuf, uint32_t newSize, uint8_t *baseBuf,
   BufferStreamDescriptor deltaStream = {*deltaBuf, 0, *deltaSize};
   BufferStreamDescriptor instStream = {instbuf, 0, sizeof(instbuf)}; // Instruction stream
   BufferStreamDescriptor dataStream = {databuf, 0, sizeof(databuf)};
-  BufferStreamDescriptor newStream = {newBuf, begSize, newSize};
+  ReadOnlyBufferStreamDescriptor newStream = {newBuf, begSize, newSize};
   DeltaUnitMem unit = {}; // In-memory represtation of current working unit
 
   if (begSize + endSize >= baseSize) { // TODO: test this path
@@ -530,7 +553,7 @@ int gencode(uint8_t *newBuf, uint32_t newSize, uint8_t *baseBuf,
   return deltaStream.cursor; 
 }
 
-int gdecode(uint8_t *deltaBuf, uint32_t deltaSize, uint8_t *baseBuf, uint32_t baseSize,
+int gdecode(const uint8_t *deltaBuf, uint32_t deltaSize, const uint8_t *baseBuf, uint32_t baseSize,
             uint8_t **outBuf, uint32_t *outSize) {
 
   if (*outBuf == nullptr) {
@@ -541,11 +564,11 @@ int gdecode(uint8_t *deltaBuf, uint32_t deltaSize, uint8_t *baseBuf, uint32_t ba
   struct timespec tf0, tf1;
   clock_gettime(CLOCK_MONOTONIC, &tf0);
 #endif
-  BufferStreamDescriptor deltaStream = {deltaBuf, 0, deltaSize}; // Instructions
+  ReadOnlyBufferStreamDescriptor deltaStream = {deltaBuf, 0, deltaSize}; // Instructions
   uint64_t instructionLength = read_varint(deltaStream);
-  BufferStreamDescriptor addDeltaStream = {deltaBuf, deltaStream.cursor + instructionLength, deltaSize};
+  ReadOnlyBufferStreamDescriptor addDeltaStream = {deltaBuf, deltaStream.cursor + instructionLength, deltaSize};
+  ReadOnlyBufferStreamDescriptor baseStream = {baseBuf, 0, baseSize}; // Data in
   BufferStreamDescriptor outStream = {*outBuf, 0, *outSize};   // Data out
-  BufferStreamDescriptor baseStream = {baseBuf, 0, baseSize}; // Data in
   DeltaUnitMem unit = {};
 
   while (deltaStream.cursor < instructionLength) {
