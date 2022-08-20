@@ -23,4 +23,4 @@ target_compile_options(gdelta
           >)
 
 install(TARGETS gdelta gdelta.exe)
-install(FILES gdelta.h DESTINATION include)
+install(FILES gdelta.h gdelta_internal.h DESTINATION include)
